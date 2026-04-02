@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+dist/
+build/
+*.egg-info/
+.DS_Store
+
+# Local-only model artifacts (commit them only if you choose to)
+# models/
