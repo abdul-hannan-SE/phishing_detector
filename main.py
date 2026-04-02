@@ -31,11 +31,17 @@ APP_ROOT = Path(__file__).resolve().parent
 MODELS_DIR = Path(os.getenv("MODELS_DIR", str(APP_ROOT / "models")))
 
 VECTORIZER_PATH = MODELS_DIR / "tfidf_vectorizer.pkl"
+ALT_VECTORIZER_PATHS = [
+    MODELS_DIR / "tfidf.pkl",
+]
+
 SMS_MODEL_PATH = MODELS_DIR / "sms_rf_model (2).pkl"
 ALT_SMS_MODEL_PATHS = [
     MODELS_DIR / "sms_rf_model.pkl",
     MODELS_DIR / "sms_rf_model(2).pkl",
     MODELS_DIR / "sms_rf_model_2.pkl",
+    MODELS_DIR / "xgb_sms_model (1).pkl",
+    MODELS_DIR / "xgb_sms_model.pkl",
 ]
 
 # Optional: let Railway download model files at boot.
@@ -86,7 +92,9 @@ def _load_joblib(path: Path) -> Any:
     return joblib.load(path)
 
 def _ensure_models_present() -> None:
-    if VECTORIZER_PATH.exists() and (SMS_MODEL_PATH.exists() or any(p.exists() for p in ALT_SMS_MODEL_PATHS)):
+    has_vec = VECTORIZER_PATH.exists() or any(p.exists() for p in ALT_VECTORIZER_PATHS)
+    has_sms = SMS_MODEL_PATH.exists() or any(p.exists() for p in ALT_SMS_MODEL_PATHS)
+    if has_vec and has_sms:
         return
 
     if not MODEL_BASE_URL:
@@ -102,8 +110,21 @@ def _ensure_models_present() -> None:
         with urllib.request.urlopen(url) as resp:  # nosec - controlled by deployment env var
             dest.write_bytes(resp.read())
 
-    if not VECTORIZER_PATH.exists():
-        _download("tfidf_vectorizer.pkl", VECTORIZER_PATH)
+    if not VECTORIZER_PATH.exists() and not any(p.exists() for p in ALT_VECTORIZER_PATHS):
+        # try canonical name first, then alternates
+        try:
+            _download("tfidf_vectorizer.pkl", VECTORIZER_PATH)
+        except Exception:
+            last_err: Exception | None = None
+            for p in ALT_VECTORIZER_PATHS:
+                try:
+                    _download(p.name, p)
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+            if last_err is not None:
+                raise last_err
 
     if not SMS_MODEL_PATH.exists() and not any(p.exists() for p in ALT_SMS_MODEL_PATHS):
         # try canonical name first, then alternates
@@ -129,11 +150,19 @@ def _resolve_sms_model_path() -> Path:
             return p
     return SMS_MODEL_PATH
 
+def _resolve_vectorizer_path() -> Path:
+    if VECTORIZER_PATH.exists():
+        return VECTORIZER_PATH
+    for p in ALT_VECTORIZER_PATHS:
+        if p.exists():
+            return p
+    return VECTORIZER_PATH
+
 
 @app.on_event("startup")
 def _startup_load_models() -> None:
     _ensure_models_present()
-    app.state.vectorizer = _load_joblib(VECTORIZER_PATH)
+    app.state.vectorizer = _load_joblib(_resolve_vectorizer_path())
     app.state.sms_model = _load_joblib(_resolve_sms_model_path())
 
 
